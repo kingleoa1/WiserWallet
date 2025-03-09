@@ -2,7 +2,7 @@ import styled from "styled-components";
 import toFlexible from "toflexible";
 
 import Avatar from "@mybucks/components/Avatar";
-import { BALANCE_PLACEHOLDER } from "@mybucks/lib/conf";
+import { BALANCE_PLACEHOLDER, EVM_NETWORKS, NETWORK } from "@mybucks/lib/conf";
 import { formatCurrency } from "@mybucks/lib/utils";
 
 /*
@@ -14,10 +14,13 @@ import { formatCurrency } from "@mybucks/lib/utils";
     address,
     decimals,
     chainId,
+    native (optional),
   balance:
     0
   onClick:
     (token) => void
+  showBalance:
+    boolean
 */
 
 const Wrap = styled.div`
@@ -74,36 +77,41 @@ const Value = styled.p`
   min-height: 21px;
 `;
 
-const TokenBalanceRow = ({ token, balance, quote, onClick, showBalance }) => (
-  <Wrap onClick={() => onClick(token)}>
-    <Avatar
-      uri={token.logoURI}
-      symbol={token.symbol}
-      fallbackColor={"#" + token.contract.slice(2, 8)}
-    />
-    <SymbolAndNameWrap>
-      <Symbol>{token.symbol}</Symbol>
-      <Name>{token.name}</Name>
-    </SymbolAndNameWrap>
+const TokenBalanceRow = ({ token, balance, quote, onClick, showBalance }) => {
+  const network = EVM_NETWORKS.find((n) => n.chainId === token.chainId);
+  const symbol = token.symbol.startsWith("USDC") ? "USDC" : token.symbol;
 
-    <BalanceAndValueWrap>
-      <Balance>
-        {!showBalance
-          ? BALANCE_PLACEHOLDER
-          : balance > 0
+  return (
+    <Wrap onClick={() => onClick(token)}>
+      <Avatar
+        uri={token.logoURI}
+        symbol={symbol}
+        fallbackColor={"#" + token.address.slice(2, 8)}
+      />
+      <SymbolAndNameWrap>
+        <Symbol>{symbol}</Symbol>
+        <Name>{token.name || symbol}</Name>
+      </SymbolAndNameWrap>
+
+      <BalanceAndValueWrap>
+        <Balance>
+          {!showBalance
+            ? BALANCE_PLACEHOLDER
+            : balance > 0
             ? toFlexible(balance, 2)
             : "0.00"}
-      </Balance>
+        </Balance>
 
-      <Value>
-        {!showBalance
-          ? BALANCE_PLACEHOLDER
-          : quote > 0
+        <Value>
+          {!showBalance
+            ? BALANCE_PLACEHOLDER
+            : quote > 0
             ? formatCurrency(quote)
             : ""}
-      </Value>
-    </BalanceAndValueWrap>
-  </Wrap>
-);
+        </Value>
+      </BalanceAndValueWrap>
+    </Wrap>
+  );
+};
 
 export default TokenBalanceRow;
