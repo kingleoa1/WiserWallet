@@ -1,12 +1,15 @@
 import { getEvmPrivateKey } from "@mybucks.online/core";
 import { tokens as defaultTokensList } from "@uniswap/default-token-list";
-import { Alchemy } from "alchemy-sdk";
-import { Contract, ethers } from "ethers";
+import { Alchemy, WalletConnectProvider } from "alchemy-sdk";
+import { ethers, Contract } from "ethers";
+import WalletConnect from "@walletconnect/client";
+import QRCodeModal from "qrcode-modal";
 
 import { EVM_NETWORKS, NETWORK } from "@mybucks/lib/conf";
 import IERC20 from "@mybucks/lib/erc20.json";
 
 const alchemyApiKey = import.meta.env.VITE_ALCHEMY_API_KEY;
+const infuraApiKey = import.meta.env.VITE_INFURA_API_KEY;
 
 class EvmAccount {
   network = NETWORK.EVM;
@@ -26,11 +29,18 @@ class EvmAccount {
   gasPrice = 0;
 
   alchemyClient = null;
+  walletConnectProvider = null;
+  walletConnectConnector = null;
 
   constructor(hashKey, chainId) {
     this.chainId = chainId;
     this.networkInfo = EVM_NETWORKS.find((n) => n.chainId === chainId);
-    this.provider = new ethers.JsonRpcProvider(this.networkInfo.provider);
+
+    if (this.networkInfo.name === NETWORK.WALLET_CONNECT) {
+      this.provider = this.initWalletConnect();
+    } else {
+      this.provider = new ethers.JsonRpcProvider(this.networkInfo.provider);
+    }
 
     this.signer = getEvmPrivateKey(hashKey);
     this.account = new ethers.Wallet(this.signer, this.provider);
@@ -58,9 +68,36 @@ class EvmAccount {
     return this.networkInfo.scanner + "/tx/" + txn;
   }
 
+  initWalletConnect() {
+    const provider = new WalletConnectProvider({
+      infuraId: infuraApiKey,
+    });
+
+    const connector = new WalletConnect({
+      bridge: "https://bridge.walletconnect.org",
+      qrcodeModal: QRCodeModal,
+    });
+
+    this.walletConnectProvider = provider;
+    this.walletConnectConnector = connector;
+
+    return provider;
+  }
+
+  async connectWalletConnect() {
+    if (!this.walletConnectConnector.connected) {
+      await this.walletConnectConnector.createSession();
+    }
+  }
+
   async getNetworkStatus() {
-    const { gasPrice } = await this.provider.getFeeData();
-    this.gasPrice = gasPrice;
+    if (this.networkInfo.name === NETWORK.WALLET_CONNECT) {
+      const { gasPrice } = await this.walletConnectProvider.getFeeData();
+      this.gasPrice = gasPrice;
+    } else {
+      const { gasPrice } = await this.provider.getFeeData();
+      this.gasPrice = gasPrice;
+    }
   }
 
   async queryBalances() {
@@ -69,6 +106,7 @@ class EvmAccount {
       this.provider.getBalance(this.address),
       this.alchemyClient.core.getTokenBalances(this.address),
     ]);
+
     // get balances of native token, erc20 tokens and merge into single array
     // it uses wrapped asset in order to get the price of native currency
     tokenBalances.unshift({
@@ -76,8 +114,35 @@ class EvmAccount {
       tokenBalance: nativeBalance,
       native: true,
     });
+
+    // Add USDC, USDT, and USD balances if available
+    const usdcBalance = await this.getTokenBalance("USDC");
+    const usdtBalance = await this.getTokenBalance("USDT");
+    const usdBalance = await this.getTokenBalance("USD");
+    if (usdcBalance) {
+      tokenBalances.push({
+        symbol: "USDC",
+        contractAddress: this.networkInfo.usdc,
+        tokenBalance: usdcBalance,
+      });
+    }
+    if (usdtBalance) {
+      tokenBalances.push({
+        symbol: "USDT",
+        contractAddress: this.networkInfo.usdt,
+        tokenBalance: usdtBalance,
+      });
+    }
+    if (usdBalance) {
+      tokenBalances.push({
+        symbol: "USD",
+        contractAddress: this.networkInfo.usd,
+        tokenBalance: usdBalance,
+      });
+    }
+
     // find token details including name, symbol, decimals
-    // and filter out not-listed(spam) tokens
+    // and filter out not-listed (spam) tokens
     const filteredBalances = tokenBalances
       .map(({ contractAddress, tokenBalance, native }) => ({
         ...defaultTokensList.find(
@@ -96,7 +161,7 @@ class EvmAccount {
 
     // get prices
     const response = await fetch(
-      `https://api.g.alchemy.com/prices/v1/${alchemyApiKey}/tokens/by-address`,
+      `https://api.alchemy.com/prices/v1/${alchemyApiKey}/tokens/by-address`,
       {
         method: "POST",
         headers: {
@@ -130,25 +195,18 @@ class EvmAccount {
     balances[0].address = "0x";
     balances[0].name = balances[0].name.split(" ")[1];
     balances[0].symbol = balances[0].symbol.slice(1);
-    return balances;
 
-    /**
-     * return format:
-     *
-     * array of
-     *
-     * chainId,
-     * address
-     * name
-     * symbol
-     * decimals
-     * logoURI
-     * balance
-     * rawBalance
-     * price
-     * quote
-     * native (optional)
-     */
+    return balances;
+  }
+
+  async getTokenBalance(symbol) {
+    const token = defaultTokensList.find((t) => t.symbol === symbol);
+    if (!token) return null;
+
+    const tokenBalance = await this.alchemyClient.core.getTokenBalance(
+      this.address, token.address
+    );
+    return tokenBalance;
   }
 
   async queryTokenHistory(tokenAddress, decimals, maxCount = 5) {
@@ -200,27 +258,8 @@ class EvmAccount {
         })
       )
       .slice(0, maxCount);
-
-    /**
-     * return format:
-     *
-     * array of
-     *
-     * from
-     * to
-     * value
-     * hash
-     * blockNum
-     * blockTimestamp
-     */
   }
 
-  /**
-   *
-   * @param {*} token contract address or null(for native currency)
-   * @param {*} to
-   * @param {*} value
-   */
   async populateTransferToken(token, to, value) {
     if (!token) {
       return {
@@ -237,24 +276,34 @@ class EvmAccount {
     return result;
   }
 
-  async estimateGas({ to, data, value = 0, from = this.account.address }) {
-    return await this.provider.estimateGas({
-      to,
-      data,
-      value,
-      from,
-    });
+  async estimateGas({ to, data, value = 0, from = this.address }) {
+    if (this.networkInfo.name === NETWORK.WALLET_CONNECT) {
+      return await this.walletConnectProvider.estimateGas({ to, data, value, from });
+    } else {
+      return await this.provider.estimateGas({ to, data, value, from });
+    }
   }
 
   async execute({ to, data, value = 0, gasPrice = null, gasLimit = null }) {
-    const tx = await this.account.sendTransaction({
-      to,
-      value,
-      data,
-      gasPrice,
-      gasLimit,
-    });
-    return await tx.wait();
+    if (this.networkInfo.name === NETWORK.WALLET_CONNECT) {
+      const tx = await this.walletConnectProvider.sendTransaction({
+        to,
+        value,
+        data,
+        gasPrice,
+        gasLimit,
+      });
+      return await tx.wait();
+    } else {
+      const tx = await this.account.sendTransaction({
+        to,
+        value,
+        data,
+        gasPrice,
+        gasLimit,
+      });
+      return await tx.wait();
+    }
   }
 }
 
