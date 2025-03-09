@@ -1,4 +1,6 @@
-import { Network } from "alchemy-sdk";
+import { Network, WalletConnectProvider } from "alchemy-sdk";
+import WalletConnect from "@walletconnect/client";
+import QRCodeModal from "qrcode-modal";
 
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;
@@ -10,6 +12,7 @@ export const PASSCODE_MAX_TRY = 3;
 export const NETWORK = Object.freeze({
   EVM: "evm",
   TRON: "tron",
+  WALLET_CONNECT: "walletConnect",
 });
 
 export const DEFAULT_NETWORK = NETWORK.EVM;
@@ -25,6 +28,9 @@ export const EVM_NETWORKS = [
       "https://mainnet.infura.io/v3/" + import.meta.env.VITE_INFURA_API_KEY,
     scanner: "https://etherscan.io",
     wrappedAsset: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    usdt: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    usd: "0x0000000000000000000000000000000000000000",
   },
   {
     chainId: 137,
@@ -92,9 +98,14 @@ export const EVM_NETWORKS = [
   },
 ];
 
+];
+
 export const findNetworkByName = (networkName) => {
   if (networkName === NETWORK.TRON) {
     return [NETWORK.TRON, 1];
+  }
+  if (networkName === NETWORK.WALLET_CONNECT) {
+    return [NETWORK.WALLET_CONNECT, 1];
   }
 
   const { chainId } = EVM_NETWORKS.find((item) => item.name === networkName);
@@ -104,6 +115,9 @@ export const findNetworkByName = (networkName) => {
 export const findNetworkNameByChainId = (network, chainId) => {
   if (network === NETWORK.TRON) {
     return NETWORK.TRON;
+  }
+  if (network === NETWORK.WALLET_CONNECT) {
+    return NETWORK.WALLET_CONNECT;
   }
 
   const { name } = EVM_NETWORKS.find((item) => item.chainId === chainId);
@@ -141,3 +155,25 @@ export const UNKNOWN_FACTS = [
   "Your account's origin remains anonymous.",
   "There's no reset or recovery option.",
 ];
+
+export const initWalletConnect = async () => {
+  const provider = new WalletConnectProvider({
+    infuraId: import.meta.env.VITE_INFURA_API_KEY,
+  });
+
+  await provider.enable();
+  return provider;
+};
+
+export const connectWalletConnect = async () => {
+  const connector = new WalletConnect({
+    bridge: "https://bridge.walletconnect.org",
+    qrcodeModal: QRCodeModal,
+  });
+
+  if (!connector.connected) {
+    connector.createSession();
+  }
+
+  return connector;
+};
