@@ -7,7 +7,7 @@ import BaseButton from "@mybucks/components/Button";
 import { Box, Container } from "@mybucks/components/Containers";
 import { H3 } from "@mybucks/components/Texts";
 import { StoreContext } from "@mybucks/contexts/Store";
-import { GAS_PRICE, gasMultiplier } from "@mybucks/lib/conf";
+import { GAS_PRICE, gasMultiplier, EVM_NETWORKS, NETWORK } from "@mybucks/lib/conf";
 import media from "@mybucks/styles/media";
 
 const NavsWrapper = styled.div`
@@ -87,7 +87,7 @@ const Button = styled(BaseButton)`
 `;
 
 const ConfirmTransaction = ({ to, value = 0, data, onSuccess, onReject }) => {
-  const { account, fetchBalances, nativeTokenName, nativeTokenPrice } =
+  const { account, fetchBalances, nativeTokenName, nativeTokenPrice, networkInfo } =
     useContext(StoreContext);
   const [gasOption, setGasOption] = useState(GAS_PRICE.LOW);
 
@@ -98,17 +98,31 @@ const ConfirmTransaction = ({ to, value = 0, data, onSuccess, onReject }) => {
 
   useEffect(() => {
     const estimateGas = async () => {
-      const gasAmount = await account.estimateGas({ to, data, value });
-      const gas = Number(
-        ethers.formatUnits(
-          (account.gasPrice * gasMultiplier(gasOption) * gasAmount) / 100n,
-          18
-        )
-      );
+      if (networkInfo.name === NETWORK.WALLET_CONNECT) {
+        const gasAmount = await account.estimateGas({ to, data, value });
+        const gas = Number(
+          ethers.formatUnits(
+            (account.gasPrice * gasMultiplier(gasOption) * gasAmount) / 100n,
+            18
+          )
+        );
 
-      const gasInUsd = gas * nativeTokenPrice;
-      setGasEstimation(gas.toFixed(6));
-      setGasEstimationValue(gasInUsd.toFixed(6));
+        const gasInUsd = gas * nativeTokenPrice;
+        setGasEstimation(gas.toFixed(6));
+        setGasEstimationValue(gasInUsd.toFixed(6));
+      } else {
+        const gasAmount = await account.estimateGas({ to, data, value });
+        const gas = Number(
+          ethers.formatUnits(
+            (account.gasPrice * gasMultiplier(gasOption) * gasAmount) / 100n,
+            18
+          )
+        );
+
+        const gasInUsd = gas * nativeTokenPrice;
+        setGasEstimation(gas.toFixed(6));
+        setGasEstimationValue(gasInUsd.toFixed(6));
+      }
     };
 
     estimateGas();
@@ -119,16 +133,29 @@ const ConfirmTransaction = ({ to, value = 0, data, onSuccess, onReject }) => {
     setHasError(false);
 
     try {
-      const txn = await account.execute({
-        to,
-        value,
-        data,
-        gasPrice: (account.gasPrice * gasMultiplier(gasOption)) / 100n,
-      });
+      if (networkInfo.name === NETWORK.WALLET_CONNECT) {
+        const txn = await account.execute({
+          to,
+          value,
+          data,
+          gasPrice: (account.gasPrice * gasMultiplier(gasOption)) / 100n,
+        });
 
-      // update balances
-      fetchBalances();
-      onSuccess(txn);
+        // update balances
+        fetchBalances();
+        onSuccess(txn);
+      } else {
+        const txn = await account.execute({
+          to,
+          value,
+          data,
+          gasPrice: (account.gasPrice * gasMultiplier(gasOption)) / 100n,
+        });
+
+        // update balances
+        fetchBalances();
+        onSuccess(txn);
+      }
     } catch (e) {
       setHasError(true);
     }
